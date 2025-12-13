@@ -1,0 +1,133 @@
+---
+name: Build container image
+on:
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '00 06 * * 0'  # 06:00 UTC every Sunday
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+env:
+  IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"
+  FEDORA_VERSION: "43"
+  ZFS_VERSION: "2.3.5"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build_push:
+    name: Build fedora-bootc-zfs
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Maximize build space
+        run: |
+          echo "==> Before cleanup"
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          sudo rm -rf /usr/local/share/powershell /usr/local/share/chromium /usr/local/lib/node_modules
+          sudo docker image prune --all --force
+          echo "==> After cleanup"
+          df -h /
+
+      - name: Prepare environment
+        run: |
+          echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> ${GITHUB_ENV}
+          echo "IMAGE_NAME=fedora-bootc-zfs" >> ${GITHUB_ENV}
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Get current date
+        id: date
+        run: |
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+
+      - name: Get versions for tagging
+        id: versions
+        run: |
+          # We'll get the actual kernel version after build, for now use date-based tags
+          echo "tag_date=$(date -u +%Y%m%d)" >> $GITHUB_OUTPUT
+
+      - name: Image Metadata
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
+        id: metadata
+        with:
+          tags: |
+            type=raw,value=fc${{ env.FEDORA_VERSION }}
+            type=raw,value=fc${{ env.FEDORA_VERSION }}-zfs${{ env.ZFS_VERSION }}
+            type=raw,value=fc${{ env.FEDORA_VERSION }}-${{ steps.versions.outputs.tag_date }}
+            type=raw,value=latest
+            type=sha,enable=${{ github.event_name == 'pull_request' }}
+            type=ref,event=pr
+          labels: |
+            org.opencontainers.image.created=${{ steps.date.outputs.date }}
+            org.opencontainers.image.description=Fedora bootc with OpenZFS
+            org.opencontainers.image.title=fedora-bootc-zfs
+            org.opencontainers.image.version=fc${{ env.FEDORA_VERSION }}-zfs${{ env.ZFS_VERSION }}
+            zfs.version=${{ env.ZFS_VERSION }}
+            containers.bootc=1
+          sep-tags: " "
+          sep-annotations: " "
+
+      - name: Build Image
+        id: build_image
+        uses: redhat-actions/buildah-build@7a95fa7ee0f02d552a32753e7414641a04307056 # v2
+        with:
+          containerfiles: |
+            ./Containerfile
+          build-args: |
+            FEDORA_VERSION=${{ env.FEDORA_VERSION }}
+            ZFS_VERSION=${{ env.ZFS_VERSION }}
+          image: ${{ env.IMAGE_NAME }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          oci: false
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push To GHCR
+        uses: redhat-actions/push-to-registry@5ed88d269cf581ea9ef6dd6806d01562096bee9c # v2
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        id: push
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ github.token }}
+        with:
+          registry: ${{ env.IMAGE_REGISTRY }}
+          image: ${{ env.IMAGE_NAME }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          username: ${{ env.REGISTRY_USER }}
+          password: ${{ env.REGISTRY_PASSWORD }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+
+      - name: Sign container image
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && env.COSIGN_PRIVATE_KEY != ''
+        run: |
+          IMAGE_FULL="${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}"
+          cosign sign -y --key env://COSIGN_PRIVATE_KEY "${IMAGE_FULL}@${{ steps.push.outputs.digest }}"
+        env:
+          COSIGN_EXPERIMENTAL: false
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
