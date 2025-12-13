@@ -1,8 +1,14 @@
 # Fedora Bootc ZFS
 # Fedora bootc base image with OpenZFS pre-built
 
-fedora_version := env("FEDORA_VERSION", "43")
-zfs_version := env("ZFS_VERSION", "2.3.5")
+# Load versions from versions.env
+set dotenv-load
+set dotenv-filename := "versions.env"
+
+fedora_version := env("FEDORA_VERSION")
+zfs_version := env("ZFS_VERSION", env("ZFS_STABLE_VERSION"))
+zfs_stable_version := env("ZFS_STABLE_VERSION")
+zfs_rc_version := env("ZFS_RC_VERSION")
 image_name := "fedora-bootc-zfs"
 
 # List available recipes
@@ -50,6 +56,14 @@ run:
 # Run with console output for debugging
 run-debug:
     bcvk ephemeral run-ssh --rm -K --console localhost/{{ image_name }}:latest
+
+# Build stable ZFS version
+build-stable:
+    ZFS_VERSION={{ zfs_stable_version }} just build
+
+# Build RC ZFS version
+build-rc:
+    ZFS_VERSION={{ zfs_rc_version }} just build
 
 # Remove built images
 clean:

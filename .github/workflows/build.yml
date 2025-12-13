@@ -15,17 +15,24 @@ on:
 
 env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"
-  FEDORA_VERSION: "43"
-  ZFS_VERSION: "2.3.5"
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
-  cancel-in-progress: true
 
 jobs:
   build_push:
-    name: Build fedora-bootc-zfs
+    name: Build fedora-bootc-zfs (${{ matrix.zfs_channel }})
     runs-on: ubuntu-24.04
+
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref || github.run_id }}-${{ matrix.zfs_channel }}
+      cancel-in-progress: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - zfs_channel: stable
+            is_latest: true
+          - zfs_channel: rc
+            is_latest: false
 
     permissions:
       contents: read
@@ -33,42 +40,71 @@ jobs:
       id-token: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Load versions from versions.env
+        id: versions
+        run: |
+          # Load all versions from central config
+          source versions.env
+          echo "fedora_version=${FEDORA_VERSION}" >> $GITHUB_OUTPUT
+          echo "zfs_stable_version=${ZFS_STABLE_VERSION}" >> $GITHUB_OUTPUT
+          echo "zfs_rc_version=${ZFS_RC_VERSION}" >> $GITHUB_OUTPUT
+          # Set ZFS version based on channel
+          if [ "${{ matrix.zfs_channel }}" = "stable" ]; then
+            echo "zfs_version=${ZFS_STABLE_VERSION}" >> $GITHUB_OUTPUT
+          else
+            echo "zfs_version=${ZFS_RC_VERSION}" >> $GITHUB_OUTPUT
+          fi
+          # Date for tagging
+          echo "tag_date=$(date -u +%Y%m%d)" >> $GITHUB_OUTPUT
+
       - name: Prepare environment
         run: |
           echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> ${GITHUB_ENV}
           echo "IMAGE_NAME=fedora-bootc-zfs" >> ${GITHUB_ENV}
 
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Validate ZFS release exists
+        run: |
+          VERSION="${{ steps.versions.outputs.zfs_version }}"
+          if [ -z "$VERSION" ]; then
+            echo "::error::No ZFS version configured for ${{ matrix.zfs_channel }} channel"
+            exit 1
+          fi
+          URL="https://github.com/openzfs/zfs/releases/download/zfs-${VERSION}/zfs-${VERSION}.tar.gz"
+          HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$URL")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::ZFS ${VERSION} release not found (HTTP $HTTP_CODE)"
+            exit 1
+          fi
+          echo "ZFS ${VERSION} release validated"
 
       - name: Get current date
         id: date
         run: |
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
-      - name: Get versions for tagging
-        id: versions
-        run: |
-          # We'll get the actual kernel version after build, for now use date-based tags
-          echo "tag_date=$(date -u +%Y%m%d)" >> $GITHUB_OUTPUT
-
       - name: Image Metadata
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
         id: metadata
         with:
           tags: |
-            type=raw,value=fc${{ env.FEDORA_VERSION }}
-            type=raw,value=fc${{ env.FEDORA_VERSION }}-zfs${{ env.ZFS_VERSION }}
-            type=raw,value=fc${{ env.FEDORA_VERSION }}-${{ steps.versions.outputs.tag_date }}
-            type=raw,value=latest
+            type=raw,value=fc${{ steps.versions.outputs.fedora_version }},enable=${{ matrix.zfs_channel == 'stable' }}
+            type=raw,value=fc${{ steps.versions.outputs.fedora_version }}-${{ steps.versions.outputs.tag_date }},enable=${{ matrix.zfs_channel == 'stable' }}
+            type=raw,value=latest,enable=${{ matrix.is_latest == true }}
+            type=raw,value=rc,enable=${{ matrix.zfs_channel == 'rc' }}
+            type=raw,value=fc${{ steps.versions.outputs.fedora_version }}-rc,enable=${{ matrix.zfs_channel == 'rc' }}
+            type=raw,value=fc${{ steps.versions.outputs.fedora_version }}-zfs${{ steps.versions.outputs.zfs_version }}
             type=sha,enable=${{ github.event_name == 'pull_request' }}
             type=ref,event=pr
           labels: |
             org.opencontainers.image.created=${{ steps.date.outputs.date }}
             org.opencontainers.image.description=Fedora bootc with OpenZFS
             org.opencontainers.image.title=fedora-bootc-zfs
-            org.opencontainers.image.version=fc${{ env.FEDORA_VERSION }}-zfs${{ env.ZFS_VERSION }}
-            zfs.version=${{ env.ZFS_VERSION }}
+            org.opencontainers.image.version=fc${{ steps.versions.outputs.fedora_version }}-zfs${{ steps.versions.outputs.zfs_version }}
+            zfs.version=${{ steps.versions.outputs.zfs_version }}
+            zfs.channel=${{ matrix.zfs_channel }}
             containers.bootc=1
           sep-tags: " "
           sep-annotations: " "
@@ -80,8 +116,8 @@ jobs:
           containerfiles: |
             ./Containerfile
           build-args: |
-            FEDORA_VERSION=${{ env.FEDORA_VERSION }}
-            ZFS_VERSION=${{ env.ZFS_VERSION }}
+            FEDORA_VERSION=${{ steps.versions.outputs.fedora_version }}
+            ZFS_VERSION=${{ steps.versions.outputs.zfs_version }}
           image: ${{ env.IMAGE_NAME }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}

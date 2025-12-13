@@ -25,21 +25,50 @@ COPY your-files /
 
 ## Available Tags
 
+### Stable Builds
+
 | Tag | Description |
 |-----|-------------|
-| `fc43` | Latest build for Fedora 43 |
-| `fc43-zfs2.3.5` | Fedora 43 with ZFS 2.3.5 |
-| `fc43-YYYYMMDD` | Date-stamped build |
-| `latest` | Most recent build |
+| `latest` | Most recent stable build |
+| `fc43` | Latest stable build for Fedora 43 |
+| `fc43-zfs2.3.5` | Fedora 43 with ZFS 2.3.5 (stable) |
+| `fc43-YYYYMMDD` | Date-stamped stable build |
+
+### Release Candidate Builds
+
+| Tag | Description |
+|-----|-------------|
+| `rc` | Latest RC build |
+| `fc43-rc` | Latest RC build for Fedora 43 |
+| `fc43-zfs2.4.0-rc5` | Fedora 43 with ZFS 2.4.0-rc5 (RC) |
+
+## Version Management
+
+All versions are centrally defined in `versions.env`:
+
+```bash
+# versions.env
+FEDORA_VERSION=43
+ZFS_STABLE_VERSION=2.3.5
+ZFS_RC_VERSION=2.4.0-rc5
+```
+
+To update versions, edit this single file. Both CI and local builds read from it.
 
 ## Building Locally
 
 ```bash
-# Build the image
+# Build the image (uses default stable version)
 just build
 
-# Build with specific versions
-FEDORA_VERSION=43 ZFS_VERSION=2.3.5 just build
+# Build stable version explicitly
+just build-stable
+
+# Build RC version
+just build-rc
+
+# Build with a custom version override
+ZFS_VERSION=2.3.4 just build
 
 # Build without cache
 just build-clean
