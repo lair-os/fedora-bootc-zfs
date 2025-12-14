@@ -118,7 +118,12 @@ COPY build_files/systemd/zfs-import-scan.service.d/ /etc/systemd/system/zfs-impo
 # Install tmpfiles.d config for pcp directories (needed by sysstat, which ZFS requires)
 COPY build_files/zfs-tmpfiles.conf /usr/lib/tmpfiles.d/zfs.conf
 
-# Build initramfs with ZFS support
+# Install dracut module to disable ZFS import in initramfs
+# For non-ZFS-root systems, import happens after real root is mounted
+COPY build_files/dracut/modules.d/99zfs-no-initrd-import /usr/lib/dracut/modules.d/99zfs-no-initrd-import
+RUN chmod +x /usr/lib/dracut/modules.d/99zfs-no-initrd-import/module-setup.sh
+
+# Build initramfs with ZFS support (but no initrd import)
 RUN depmod -a "$(ls /usr/lib/modules)" && \
     kver=$(ls /usr/lib/modules) && \
     DRACUT_NO_XATTR=1 dracut -vf /usr/lib/modules/$kver/initramfs.img "$kver"
