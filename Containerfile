@@ -114,6 +114,10 @@ RUN --mount=type=bind,from=zfs-builder,src=/rpms,dst=/rpms/zfs \
 RUN --mount=type=bind,from=build-ctx,source=/,target=/ctx \
     /ctx/build_files/scripts/enable-zfs-services.sh
 
+# Install systemd drop-ins for bootc compatibility
+# zfs-import-scan needs to wait for /etc overlay to access hostname/hostid
+COPY build_files/systemd/zfs-import-scan.service.d/ /etc/systemd/system/zfs-import-scan.service.d/
+
 # Install tmpfiles.d config for pcp directories (needed by sysstat, which ZFS requires)
 COPY build_files/zfs-tmpfiles.conf /usr/lib/tmpfiles.d/zfs.conf
 
