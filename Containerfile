@@ -53,10 +53,6 @@ RUN --mount=type=cache,dst=/var/cache/dnf,sharing=locked \
         libattr-devel \
         libtirpc-devel \
         python3 \
-        python3-devel \
-        python3-cffi \
-        python3-setuptools \
-        libffi-devel \
         ncompress \
         curl
 
@@ -76,7 +72,8 @@ WORKDIR /build/zfs-${ZFS_VERSION}
 RUN source /tmp/kernel-version && \
     ./configure \
         --with-linux=/usr/src/kernels/${KERNEL_VERSION} \
-        --with-linux-obj=/usr/src/kernels/${KERNEL_VERSION}
+        --with-linux-obj=/usr/src/kernels/${KERNEL_VERSION} \
+        --disable-pyzfs
 
 # Build kmod RPMs
 RUN make -j$(nproc) rpm-kmod \
