@@ -7,7 +7,11 @@ Fedora bootc base image with OpenZFS kernel modules pre-built and ready to use.
 - ZFS kernel modules built for the exact kernel in `fedora-bootc`
 - ZFS userspace tools (`zpool`, `zfs`, `zdb`, etc.)
 - ZFS systemd services enabled (auto-import, mount, share)
-- initramfs rebuilt with ZFS support (for ZFS root if desired)
+
+> **Note:** This image does not support ZFS root. Pool import is deferred to
+> after the root filesystem is mounted to ensure `/etc/hostid` and
+> `/etc/hostname` are available. If you need ZFS root, remove
+> `/usr/lib/dracut/modules.d/99zfs-no-initrd-import` and rebuild initramfs.
 
 ## Usage
 
